@@ -12,5 +12,6 @@ https://drive.google.com/file/d/1u9yVVDrypylXd7Nluc1hMb-PTdU1568H/view?usp=shari
 ## Steps to run the tool
 
 - git clone the repository  
-- build the go files  
+- build the go files
+- Type go build <project-file>
 - after the executable is made, execute it
