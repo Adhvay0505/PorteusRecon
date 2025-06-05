@@ -1,8 +1,6 @@
-# Adhvay_Banerjee_Cybersceurity
+# PorteusRecon
 
-Adhvay Banerjee 2301410002  
-A port scanner built using Golang
-https://drive.google.com/file/d/1u9yVVDrypylXd7Nluc1hMb-PTdU1568H/view?usp=sharing
+A GUI port scanner built using Golang
 
 ## Technolgoies used
 
@@ -11,7 +9,7 @@ https://drive.google.com/file/d/1u9yVVDrypylXd7Nluc1hMb-PTdU1568H/view?usp=shari
 
 ## Steps to run the tool
 
-- git clone the repository  
+- git clone https://github.com/Adhvay0505/PorteusRecon.git
 - build the go files
-- Type go build [project-file]
+- go build [project-file]
 - after the executable is made, execute it
