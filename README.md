@@ -10,9 +10,27 @@ A GUI port scanner built using Golang
 ## Steps to run the tool
 
 - git clone https://github.com/Adhvay0505/PorteusRecon.git
-- build the go files
-- go build [project-file]
-- after the executable is made, execute it
+  
+### Option 1
+- run the PorteusReconCLI.go & PorteusReconGUI.go files 
+ ```bash
+go run PorteusReconCLI.go
+```
+```bash
+go run PorteusReconGUI.go
+```
+
+  ### Option 2
+- build the PorteusReconCLI.go & PorteusReconGUI.go files
+```bash
+-go build PorteusReconCLI.go
+```
+```bash
+-go build PorteusReconGUI.go
+```
+- Execute the ELF executable files
+- ``` ./PorteusReconCLI.go```
+- ``` ./PorteusReconGUI.go```
 
 
 ## Dark Mode
