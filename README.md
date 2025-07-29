@@ -1,6 +1,6 @@
 # PorteusRecon
 
-A GUI port scanner built using Golang
+A simple & fast port scanner built using Golang
 
 ## Technolgoies used
 
