@@ -1,36 +1,69 @@
 # PorteusRecon
 
-A simple & fast port scanner built using Golang
+A simple port scanner built in Go with both CLI and Fyne GUI entrypoints.
 
-## Technolgoies used
+## Technologies Used
 
-- Go Programming language  
-- Fyne GUI app development toolkit
+- Go
+- Fyne GUI toolkit
 
-## Steps to run the tool
+## Run From Source
 
-- git clone https://github.com/Adhvay0505/PorteusRecon.git
-  
-### Option 1
-- run the PorteusReconCLI.go & PorteusReconGUI.go files 
- ```bash
-go run PorteusReconCLI.go
+Clone the repository:
+
+```bash
+git clone https://github.com/Adhvay0505/PorteusRecon.git
+cd PorteusRecon
 ```
+
+Run the CLI:
+
+```bash
+go run PorteusReconCLI.go -host 127.0.0.1 -start 1 -end 1024
+```
+
+Run the GUI:
+
 ```bash
 go run PorteusReconGUI.go
 ```
 
-  ### Option 2
-- build the PorteusReconCLI.go & PorteusReconGUI.go files
+## Build Binaries
+
+Build the CLI:
+
 ```bash
--go build PorteusReconCLI.go
+go build -o dist/PorteusReconCLI PorteusReconCLI.go
 ```
+
+Build the GUI:
+
 ```bash
--go build PorteusReconGUI.go
+go build -o dist/PorteusReconGUI PorteusReconGUI.go
 ```
-- Execute the ELF executable files
-- ``` ./PorteusReconCLI.go```
-- ``` ./PorteusReconGUI.go```
+
+Run the built binaries:
+
+```bash
+./dist/PorteusReconCLI -host 127.0.0.1 -start 1 -end 1024
+./dist/PorteusReconGUI
+```
+
+## Linux GUI Dependencies
+
+On Arch Linux, the Fyne desktop build needs system graphics libraries:
+
+```bash
+sudo pacman -Sy --needed base-devel pkgconf mesa libx11 libxcursor libxinerama libxrandr libxi
+```
+
+## Packaged GUI Artifact
+
+The packaged Linux GUI build produced in this repo is:
+
+```bash
+dist/PorteusReconGUI_linux_amd64.tar.gz
+```
 
 
 ## Dark Mode
