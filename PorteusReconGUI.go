@@ -155,10 +155,8 @@ func main() {
 	summaryLabel := widget.NewLabel("No scan has been run yet.")
 	summaryLabel.Wrapping = fyne.TextWrapWord
 
-	resultsOutput := widget.NewMultiLineEntry()
-	resultsOutput.SetPlaceHolder("Open ports and scan messages will appear here.")
+	resultsOutput := widget.NewLabel("Open ports and scan messages will appear here.")
 	resultsOutput.Wrapping = fyne.TextWrapWord
-	resultsOutput.Disable()
 
 	resultsScroll := container.NewScroll(resultsOutput)
 	resultsScroll.SetMinSize(fyne.NewSize(640, 300))
