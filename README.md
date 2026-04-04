@@ -59,10 +59,19 @@ sudo pacman -Sy --needed base-devel pkgconf mesa libx11 libxcursor libxinerama l
 
 ## Packaged GUI Artifact
 
-The packaged Linux GUI build produced in this repo is:
+Build release artifacts outside the repository:
 
 ```bash
-dist/PorteusReconGUI_linux_amd64.tar.gz
+mkdir -p /root/PorteusRecon-dist
+go build -o /root/PorteusRecon-dist/PorteusReconGUI PorteusReconGUI.go
+tar -czf /root/PorteusRecon-dist/PorteusReconGUI_linux_amd64.tar.gz -C /root/PorteusRecon-dist PorteusReconGUI
+```
+
+By default this writes to:
+
+```bash
+/root/PorteusRecon-dist/PorteusReconGUI
+/root/PorteusRecon-dist/PorteusReconGUI_linux_amd64.tar.gz
 ```
 
 
@@ -77,5 +86,3 @@ dist/PorteusReconGUI_linux_amd64.tar.gz
 <img width="1885" height="945" alt="Screenshot_2026-04-03_19-33-42" src="https://github.com/user-attachments/assets/bb8cddd7-107f-4d4d-9461-1cc4a0f04d27" />
 
 <img width="1030" height="744" alt="Screenshot From 2025-07-29 19-46-09" src="https://github.com/user-attachments/assets/5025b914-9eca-4a63-80cd-936aef843581" />
-
-
