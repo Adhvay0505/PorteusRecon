@@ -30,24 +30,42 @@ go run PorteusReconGUI.go
 
 ## Build Binaries
 
-Build the CLI:
+Create the external build directory:
 
 ```bash
-go build -o dist/PorteusReconCLI PorteusReconCLI.go
+mkdir -p /root/PorteusRecon-dist
 ```
 
-Build the GUI:
+Build the CLI outside the repository:
 
 ```bash
-go build -o dist/PorteusReconGUI PorteusReconGUI.go
+go build -o /root/PorteusRecon-dist/PorteusReconCLI PorteusReconCLI.go
+```
+
+Build the GUI outside the repository:
+
+```bash
+go build -o /root/PorteusRecon-dist/PorteusReconGUI PorteusReconGUI.go
 ```
 
 Run the built binaries:
 
 ```bash
-./dist/PorteusReconCLI -host 127.0.0.1 -start 1 -end 1024
-./dist/PorteusReconGUI
+/root/PorteusRecon-dist/PorteusReconCLI -host 127.0.0.1 -start 1 -end 1024
+/root/PorteusRecon-dist/PorteusReconGUI
 ```
+
+The repository no longer uses an in-repo `dist/` directory for build artifacts.
+
+## GUI Scan Profiles
+
+The GUI now includes:
+
+- Built-in TCP scan mode
+- Nmap-style scan profiles with command previews
+- RustScan profile selection with descriptions
+
+When the required external scanner is available, the GUI can use it automatically. Release artifacts should still be built to `/root/PorteusRecon-dist`.
 
 ## Linux GUI Dependencies
 
