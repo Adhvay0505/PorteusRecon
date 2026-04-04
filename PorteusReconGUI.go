@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	_ "embed"
 	"fmt"
 	"image/color"
+	"io"
 	"net"
+	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,9 +34,24 @@ var jetBrainsMonoItalic []byte
 var jetBrainsMonoBoldItalic []byte
 
 type scanResult struct {
-	port int
-	open bool
-	err  error
+	port    int
+	open    bool
+	service string
+	err     error
+}
+
+type scanProfile struct {
+	Name        string
+	Description string
+	Args        []string
+	PostArgs    []string
+}
+
+type builtInScanOptions struct {
+	skipHostDiscovery bool
+	serviceDetection  bool
+	osDetection       bool
+	aggressive        bool
 }
 
 type porteusTheme struct {
@@ -79,7 +97,53 @@ func (t *porteusTheme) Size(name fyne.ThemeSizeName) float32 {
 	return t.base.Size(name)
 }
 
-func scanPort(ctx context.Context, host string, port int, timeout time.Duration) scanResult {
+func probeService(host string, port int, conn net.Conn, timeout time.Duration) string {
+	_ = conn.SetDeadline(time.Now().Add(timeout))
+
+	buffer := make([]byte, 512)
+	trimBanner := func(n int) string {
+		return strings.TrimSpace(strings.ReplaceAll(string(buffer[:n]), "\x00", ""))
+	}
+
+	switch port {
+	case 22:
+		if n, err := conn.Read(buffer); err == nil && n > 0 {
+			return "ssh: " + trimBanner(n)
+		}
+	case 21, 25, 110, 143, 587:
+		if n, err := conn.Read(buffer); err == nil && n > 0 {
+			return trimBanner(n)
+		}
+	case 80, 8080, 8000, 8888:
+		_, _ = io.WriteString(conn, fmt.Sprintf("HEAD / HTTP/1.0\r\nHost: %s\r\n\r\n", host))
+		if n, err := conn.Read(buffer); err == nil && n > 0 {
+			firstLine := strings.Split(trimBanner(n), "\n")[0]
+			return strings.TrimSpace(firstLine)
+		}
+	case 443, 8443:
+		tlsConn := tls.Client(conn, &tls.Config{
+			ServerName:         host,
+			InsecureSkipVerify: true,
+		})
+		defer tlsConn.Close()
+		if err := tlsConn.Handshake(); err == nil {
+			state := tlsConn.ConnectionState()
+			if state.NegotiatedProtocol != "" {
+				return "tls: " + state.NegotiatedProtocol
+			}
+			return "tls enabled"
+		}
+		return "tls service detected"
+	}
+
+	if n, err := conn.Read(buffer); err == nil && n > 0 {
+		return trimBanner(n)
+	}
+
+	return ""
+}
+
+func scanPort(ctx context.Context, host string, port int, timeout time.Duration, detectService bool) scanResult {
 	address := net.JoinHostPort(host, strconv.Itoa(port))
 	dialer := net.Dialer{Timeout: timeout}
 
@@ -87,9 +151,14 @@ func scanPort(ctx context.Context, host string, port int, timeout time.Duration)
 	if err != nil {
 		return scanResult{port: port, err: err}
 	}
+
+	result := scanResult{port: port, open: true}
+	if detectService {
+		result.service = probeService(host, port, conn, timeout)
+	}
 	_ = conn.Close()
 
-	return scanResult{port: port, open: true}
+	return result
 }
 
 func parsePositiveInt(value string, field string) (int, error) {
@@ -116,6 +185,129 @@ func makeFieldBlock(label string, input fyne.CanvasObject) fyne.CanvasObject {
 		widget.NewLabelWithStyle(label, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		input,
 	)
+}
+
+func profilesForEngine(engine string) []scanProfile {
+	switch engine {
+	case "Nmap":
+		return []scanProfile{
+			{Name: "Default TCP Connect", Description: "Runs a straightforward TCP connect scan across the selected port range.", Args: []string{"-sT"}},
+			{Name: "Service Detection (-sV)", Description: "Attempts to identify the service and version running on open ports.", Args: []string{"-sV"}},
+			{Name: "OS Detection (-O)", Description: "Enables operating system detection for hosts that expose enough fingerprint data.", Args: []string{"-O"}},
+			{Name: "Aggressive Scan (-A)", Description: "Enables version detection, OS detection, default scripts, and traceroute.", Args: []string{"-A"}},
+			{Name: "Skip Host Discovery (-Pn)", Description: "Treats the host as online and skips the default discovery phase.", Args: []string{"-Pn"}},
+		}
+	case "RustScan":
+		return []scanProfile{
+			{Name: "Default RustScan", Description: "Runs RustScan with its standard behavior over the selected port range."},
+			{Name: "Higher Ulimit (--ulimit 5000)", Description: "Raises the file-descriptor ceiling for faster larger scans when the system allows it.", Args: []string{"--ulimit", "5000"}},
+			{Name: "Longer Timeout (--timeout 4000)", Description: "Waits longer for slow services before marking ports as closed.", Args: []string{"--timeout", "4000"}},
+			{Name: "Serial Scan Order", Description: "Scans ports in ascending order instead of using a randomized order.", Args: []string{"--scan-order", "Serial"}},
+			{Name: "Random Scan Order", Description: "Randomizes the port order to vary the scan pattern.", Args: []string{"--scan-order", "Random"}},
+			{Name: "RustScan + Nmap Aggressive", Description: "Uses RustScan to find ports quickly, then hands the results to Nmap with the aggressive -A profile.", PostArgs: []string{"-A"}},
+		}
+	default:
+		return []scanProfile{
+			{Name: "Built-in TCP Scan", Description: "Uses the internal Go TCP connect scanner across the selected port range."},
+		}
+	}
+}
+
+func profileNames(profiles []scanProfile) []string {
+	names := make([]string, 0, len(profiles))
+	for _, profile := range profiles {
+		names = append(names, profile.Name)
+	}
+	return names
+}
+
+func selectedProfileByName(profiles []scanProfile, name string) scanProfile {
+	for _, profile := range profiles {
+		if profile.Name == name {
+			return profile
+		}
+	}
+	if len(profiles) == 0 {
+		return scanProfile{}
+	}
+	return profiles[0]
+}
+
+func buildCommandPreview(engine string, profile scanProfile, host string, startPort int, endPort int) string {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		host = "<host>"
+	}
+
+	portRange := fmt.Sprintf("%d-%d", startPort, endPort)
+
+	switch engine {
+	case "Nmap":
+		args := append([]string{}, profile.Args...)
+		args = append(args, "-p", portRange, host)
+		return "nmap " + strings.Join(args, " ")
+	case "RustScan":
+		args := []string{"-a", host, "--range", portRange}
+		args = append(args, profile.Args...)
+		if len(profile.PostArgs) > 0 {
+			args = append(args, "--")
+			args = append(args, profile.PostArgs...)
+		}
+		return "rustscan " + strings.Join(args, " ")
+	default:
+		return fmt.Sprintf("Built-in TCP scan against %s on ports %s", host, portRange)
+	}
+}
+
+func runExternalScan(ctx context.Context, binary string, args []string) (string, error) {
+	if _, err := exec.LookPath(binary); err != nil {
+		return "", fmt.Errorf("%s is not installed or not in PATH", binary)
+	}
+
+	cmd := exec.CommandContext(ctx, binary, args...)
+	output, err := cmd.CombinedOutput()
+	return strings.TrimSpace(string(output)), err
+}
+
+func hasBinary(binary string) bool {
+	_, err := exec.LookPath(binary)
+	return err == nil
+}
+
+func builtInOptionsFor(engine string, profile scanProfile) builtInScanOptions {
+	options := builtInScanOptions{}
+	if engine != "Nmap" {
+		return options
+	}
+
+	switch profile.Name {
+	case "Service Detection (-sV)":
+		options.serviceDetection = true
+	case "OS Detection (-O)":
+		options.osDetection = true
+	case "Aggressive Scan (-A)":
+		options.serviceDetection = true
+		options.osDetection = true
+		options.aggressive = true
+	case "Skip Host Discovery (-Pn)":
+		options.skipHostDiscovery = true
+	}
+
+	return options
+}
+
+func discoverHost(host string) error {
+	if strings.TrimSpace(host) == "" {
+		return fmt.Errorf("host is required")
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return nil
+	}
+	_, err := net.LookupHost(host)
+	if err != nil {
+		return fmt.Errorf("host discovery failed: %w", err)
+	}
+	return nil
 }
 
 func main() {
@@ -147,6 +339,19 @@ func main() {
 	concurrencyEntry := widget.NewEntry()
 	concurrencyEntry.SetPlaceHolder("200")
 	concurrencyEntry.SetText("200")
+
+	scanEngineSelect := widget.NewSelect([]string{"Built-in TCP", "Nmap", "RustScan"}, nil)
+	scanEngineSelect.SetSelected("Built-in TCP")
+
+	activeProfiles := profilesForEngine(scanEngineSelect.Selected)
+	scanProfileSelect := widget.NewSelect(profileNames(activeProfiles), nil)
+	scanProfileSelect.SetSelected(activeProfiles[0].Name)
+
+	profileDescriptionLabel := widget.NewLabel(activeProfiles[0].Description)
+	profileDescriptionLabel.Wrapping = fyne.TextWrapWord
+
+	commandPreviewLabel := widget.NewLabel(buildCommandPreview(scanEngineSelect.Selected, activeProfiles[0], hostEntry.Text, 1, 1024))
+	commandPreviewLabel.Wrapping = fyne.TextWrapWord
 
 	showClosedCheck := widget.NewCheck("Show closed ports in results", nil)
 
@@ -184,6 +389,81 @@ func main() {
 		cancelScan context.CancelFunc
 		scanID     int
 	)
+
+	updateScanProfileUI := func() {
+		activeProfiles = profilesForEngine(scanEngineSelect.Selected)
+		scanProfileSelect.Options = profileNames(activeProfiles)
+		scanProfileSelect.SetSelected(activeProfiles[0].Name)
+		profileDescriptionLabel.SetText(activeProfiles[0].Description)
+
+		startPort, _ := strconv.Atoi(startPortEntry.Text)
+		endPort, _ := strconv.Atoi(endPortEntry.Text)
+		if startPort <= 0 {
+			startPort = 1
+		}
+		if endPort <= 0 {
+			endPort = 1024
+		}
+		commandPreviewLabel.SetText(buildCommandPreview(scanEngineSelect.Selected, activeProfiles[0], hostEntry.Text, startPort, endPort))
+	}
+
+	scanEngineSelect.OnChanged = func(string) {
+		updateScanProfileUI()
+	}
+
+	scanProfileSelect.OnChanged = func(selected string) {
+		profile := selectedProfileByName(activeProfiles, selected)
+		profileDescriptionLabel.SetText(profile.Description)
+
+		startPort, _ := strconv.Atoi(startPortEntry.Text)
+		endPort, _ := strconv.Atoi(endPortEntry.Text)
+		if startPort <= 0 {
+			startPort = 1
+		}
+		if endPort <= 0 {
+			endPort = 1024
+		}
+		commandPreviewLabel.SetText(buildCommandPreview(scanEngineSelect.Selected, profile, hostEntry.Text, startPort, endPort))
+	}
+
+	hostEntry.OnChanged = func(string) {
+		profile := selectedProfileByName(activeProfiles, scanProfileSelect.Selected)
+		startPort, _ := strconv.Atoi(startPortEntry.Text)
+		endPort, _ := strconv.Atoi(endPortEntry.Text)
+		if startPort <= 0 {
+			startPort = 1
+		}
+		if endPort <= 0 {
+			endPort = 1024
+		}
+		commandPreviewLabel.SetText(buildCommandPreview(scanEngineSelect.Selected, profile, hostEntry.Text, startPort, endPort))
+	}
+
+	startPortEntry.OnChanged = func(string) {
+		profile := selectedProfileByName(activeProfiles, scanProfileSelect.Selected)
+		startPort, _ := strconv.Atoi(startPortEntry.Text)
+		endPort, _ := strconv.Atoi(endPortEntry.Text)
+		if startPort <= 0 {
+			startPort = 1
+		}
+		if endPort <= 0 {
+			endPort = 1024
+		}
+		commandPreviewLabel.SetText(buildCommandPreview(scanEngineSelect.Selected, profile, hostEntry.Text, startPort, endPort))
+	}
+
+	endPortEntry.OnChanged = func(string) {
+		profile := selectedProfileByName(activeProfiles, scanProfileSelect.Selected)
+		startPort, _ := strconv.Atoi(startPortEntry.Text)
+		endPort, _ := strconv.Atoi(endPortEntry.Text)
+		if startPort <= 0 {
+			startPort = 1
+		}
+		if endPort <= 0 {
+			endPort = 1024
+		}
+		commandPreviewLabel.SetText(buildCommandPreview(scanEngineSelect.Selected, profile, hostEntry.Text, startPort, endPort))
+	}
 
 	var startButton *widget.Button
 	startButton = widget.NewButton("Start Scan", func() {
@@ -240,15 +520,94 @@ func main() {
 		totalPorts := endPort - startPort + 1
 		timeout := time.Duration(timeoutMS) * time.Millisecond
 		showClosed := showClosedCheck.Checked
+		selectedEngine := scanEngineSelect.Selected
+		selectedProfile := selectedProfileByName(activeProfiles, scanProfileSelect.Selected)
 
 		resultsOutput.SetText("")
-		statusLabel.SetText(fmt.Sprintf("Scanning %s:%d-%d", host, startPort, endPort))
+		statusLabel.SetText(fmt.Sprintf("%s scanning %s:%d-%d", selectedEngine, host, startPort, endPort))
 		summaryLabel.SetText(fmt.Sprintf("Running scan across %d ports.", totalPorts))
 		startButton.Disable()
 		cancelButton.Enable()
 		progress.Show()
 
 		go func() {
+			useExternal := selectedEngine == "RustScan" || (selectedEngine == "Nmap" && hasBinary("nmap"))
+			if useExternal {
+				var (
+					binary string
+					args   []string
+				)
+
+				portRange := fmt.Sprintf("%d-%d", startPort, endPort)
+				switch selectedEngine {
+				case "Nmap":
+					binary = "nmap"
+					args = append([]string{}, selectedProfile.Args...)
+					args = append(args, "-p", portRange, host)
+				case "RustScan":
+					binary = "rustscan"
+					args = []string{"-a", host, "--range", portRange}
+					args = append(args, selectedProfile.Args...)
+					if len(selectedProfile.PostArgs) > 0 {
+						args = append(args, "--")
+						args = append(args, selectedProfile.PostArgs...)
+					}
+				}
+
+				output, err := runExternalScan(ctx, binary, args)
+				finalStatus := fmt.Sprintf("%s scan completed.", selectedEngine)
+				if ctx.Err() != nil {
+					finalStatus = fmt.Sprintf("%s scan cancelled.", selectedEngine)
+				} else if err != nil {
+					finalStatus = fmt.Sprintf("%s scan failed.", selectedEngine)
+				}
+
+				if output == "" && err != nil {
+					output = err.Error()
+				}
+				if output == "" {
+					output = "No output returned."
+				}
+				finalSummary := fmt.Sprintf("%s Profile: %s", finalStatus, selectedProfile.Name)
+
+				fyne.Do(func() {
+					resultsOutput.SetText(output)
+					statusLabel.SetText(finalStatus)
+					summaryLabel.SetText(finalSummary)
+					progress.Hide()
+					startButton.Enable()
+					cancelButton.Disable()
+				})
+
+				cancelMu.Lock()
+				if scanID == currentScanID {
+					cancelScan = nil
+				}
+				cancelMu.Unlock()
+				return
+			}
+
+			builtInOptions := builtInOptionsFor(selectedEngine, selectedProfile)
+			if !builtInOptions.skipHostDiscovery {
+				if err := discoverHost(host); err != nil {
+					fyne.Do(func() {
+						resultsOutput.SetText(err.Error())
+						statusLabel.SetText("Scan failed.")
+						summaryLabel.SetText(fmt.Sprintf("Profile: %s", selectedProfile.Name))
+						progress.Hide()
+						startButton.Enable()
+						cancelButton.Disable()
+					})
+
+					cancelMu.Lock()
+					if scanID == currentScanID {
+						cancelScan = nil
+					}
+					cancelMu.Unlock()
+					return
+				}
+			}
+
 			resultsChan := make(chan scanResult)
 			sem := make(chan struct{}, concurrency)
 			var wg sync.WaitGroup
@@ -271,7 +630,7 @@ func main() {
 					select {
 					case <-ctx.Done():
 						return
-					case resultsChan <- scanPort(ctx, host, port, timeout):
+					case resultsChan <- scanPort(ctx, host, port, timeout, builtInOptions.serviceDetection || builtInOptions.aggressive):
 					}
 				}(port)
 			}
@@ -292,7 +651,11 @@ func main() {
 				processedCount++
 				if result.open {
 					openCount++
-					builder.WriteString(fmt.Sprintf("OPEN   %d\n", result.port))
+					if result.service != "" {
+						builder.WriteString(fmt.Sprintf("OPEN   %d   %s\n", result.port, result.service))
+					} else {
+						builder.WriteString(fmt.Sprintf("OPEN   %d\n", result.port))
+					}
 				} else {
 					closedCount++
 					if showClosed {
@@ -333,6 +696,13 @@ func main() {
 				openCount,
 				closedCount,
 			)
+			if selectedEngine == "Nmap" && !hasBinary("nmap") {
+				if builtInOptions.osDetection || builtInOptions.aggressive {
+					finalSummary += " | OS fingerprint data limited in current scan mode"
+				} else {
+					finalSummary += " | Profile behavior applied"
+				}
+			}
 
 			fyne.Do(func() {
 				resultsOutput.SetText(finalOutput)
@@ -402,6 +772,13 @@ func main() {
 		container.NewPadded(
 			container.NewVBox(
 				makeFieldBlock("Host", hostEntry),
+				container.NewGridWithColumns(
+					2,
+					makeFieldBlock("Scan Engine", scanEngineSelect),
+					makeFieldBlock("Flag Profile", scanProfileSelect),
+				),
+				makeFieldBlock("Profile Description", profileDescriptionLabel),
+				makeFieldBlock("Command Preview", commandPreviewLabel),
 				container.NewGridWithColumns(
 					2,
 					makeFieldBlock("Start Port", startPortEntry),
