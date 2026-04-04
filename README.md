@@ -33,26 +33,26 @@ go run PorteusReconGUI.go
 Create the external build directory:
 
 ```bash
-mkdir -p /root/PorteusRecon-dist
+mkdir -p "$HOME/PorteusRecon-dist"
 ```
 
 Build the CLI outside the repository:
 
 ```bash
-go build -o /root/PorteusRecon-dist/PorteusReconCLI PorteusReconCLI.go
+go build -o "$HOME/PorteusRecon-dist/PorteusReconCLI" PorteusReconCLI.go
 ```
 
 Build the GUI outside the repository:
 
 ```bash
-go build -o /root/PorteusRecon-dist/PorteusReconGUI PorteusReconGUI.go
+go build -o "$HOME/PorteusRecon-dist/PorteusReconGUI" PorteusReconGUI.go
 ```
 
 Run the built binaries:
 
 ```bash
-/root/PorteusRecon-dist/PorteusReconCLI -host 127.0.0.1 -start 1 -end 1024
-/root/PorteusRecon-dist/PorteusReconGUI
+"$HOME/PorteusRecon-dist/PorteusReconCLI" -host 127.0.0.1 -start 1 -end 1024
+"$HOME/PorteusRecon-dist/PorteusReconGUI"
 ```
 
 The repository no longer uses an in-repo `dist/` directory for build artifacts.
@@ -65,7 +65,7 @@ The GUI now includes:
 - Nmap-style scan profiles with command previews
 - RustScan profile selection with descriptions
 
-When the required external scanner is available, the GUI can use it automatically. Release artifacts should still be built to `/root/PorteusRecon-dist`.
+When the required external scanner is available, the GUI can use it automatically. Release artifacts should still be built to a directory under the user home directory, such as `$HOME/PorteusRecon-dist`.
 
 ## Linux GUI Dependencies
 
@@ -80,16 +80,16 @@ sudo pacman -Sy --needed base-devel pkgconf mesa libx11 libxcursor libxinerama l
 Build release artifacts outside the repository:
 
 ```bash
-mkdir -p /root/PorteusRecon-dist
-go build -o /root/PorteusRecon-dist/PorteusReconGUI PorteusReconGUI.go
-tar -czf /root/PorteusRecon-dist/PorteusReconGUI_linux_amd64.tar.gz -C /root/PorteusRecon-dist PorteusReconGUI
+mkdir -p "$HOME/PorteusRecon-dist"
+go build -o "$HOME/PorteusRecon-dist/PorteusReconGUI" PorteusReconGUI.go
+tar -czf "$HOME/PorteusRecon-dist/PorteusReconGUI_linux_amd64.tar.gz" -C "$HOME/PorteusRecon-dist" PorteusReconGUI
 ```
 
 By default this writes to:
 
 ```bash
-/root/PorteusRecon-dist/PorteusReconGUI
-/root/PorteusRecon-dist/PorteusReconGUI_linux_amd64.tar.gz
+$HOME/PorteusRecon-dist/PorteusReconGUI
+$HOME/PorteusRecon-dist/PorteusReconGUI_linux_amd64.tar.gz
 ```
 
 
